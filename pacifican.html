@@ -384,6 +384,9 @@
   .rank-track{background:var(--surface-2);border-radius:5px;height:12px;overflow:hidden;}
   .rank-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--blue-accent),#6de6ff);}
   .rank-val{text-align:right;font-weight:800;color:var(--text);font-size:13px;}
+  /* En "Top novedades" los nombres son largos: se les da el espacio flexible y la barra pasa a ancho fijo */
+  #novedadPanel .rank-row{grid-template-columns:26px 1fr 140px 44px;}
+  #novedadPanel .rank-name{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3;}
   .rank-avatar{
     width:26px;height:26px;border-radius:50%;flex:0 0 auto;
     background:linear-gradient(135deg,var(--blue-accent),#6de6ff);
@@ -446,6 +449,7 @@
   .stdchart .axis{stroke:var(--border);stroke-width:1;}
   .stdchart .bar-asese{fill:var(--blue-accent);}
   .stdchart .bar-csese{fill:#00e6c3;}
+  .stdchart .bar-sinclas{fill:var(--text-faint);}
   .stdchart .bar-val{font-size:10px;font-weight:700;fill:var(--text);font-variant-numeric:tabular-nums;}
   .stdchart .tick{font-size:10px;fill:var(--text-faint);text-transform:capitalize;}
   .month-tile-legend{display:flex;justify-content:space-between;font-size:10px;color:var(--text-faint);font-weight:600;}
@@ -633,8 +637,14 @@
 
       <div class="panel">
         <h2>Tendencia de estándares</h2>
-        <p class="panel-sub">Actos Sub Estándares (ASESE) y Condiciones Sub Estándares (CSESE) por mes</p>
+        <p class="panel-sub">Actos Subestándar (ASESE) y Condiciones Subestándar (CSESE) por mes</p>
         <div class="panel-body" id="stdTrendPanel" style="align-items:stretch;"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Top novedades</h2>
+        <p class="panel-sub">Detalle por nombre de novedad (Incursión, Intrusión, Falla de aireadores, etc.) en el período filtrado</p>
+        <div class="panel-body" id="novedadPanel" style="align-items:stretch;"></div>
       </div>
 
       <div class="table-panel">
@@ -839,7 +849,7 @@
   // Carga en vivo desde Google Sheets (una hoja por propiedad)
   // =========================================================
   var SHEET_REGISTRY = [
-    {estacion:"PACIFICAN TAURA", id:"1o9GET13SW3MCJiREAzuktNS51ZQs_tD_M-DNCGZCJd8", gids:[1340650713,1566134355,1618592145,1665494167,174959511,1877118122,1962185717,2132365608,613223367,638779634,844782482,912292373,989455536]}
+    {estacion:"PACIFICAN TAURA", prop:"PACIFICAN TAURA", id:"1o9GET13SW3MCJiREAzuktNS51ZQs_tD_M-DNCGZCJd8", gids:[1340650713,1566134355,1618592145,1665494167,174959511,1877118122,1962185717,2132365608,613223367,638779634,844782482,912292373,989455536]}
   ];
 
   var TIPO_KNOWN = ["ASESE","ASESA","ASE SE","ACESE","CSESE","CSESA","CESESE"];
@@ -855,9 +865,37 @@
     if (!s) return s;
     return s.toLowerCase().replace(/\S+/g, titleCaseWord);
   }
-  function normTipo(s){
+  // Leyenda oficial de NT (numero de novedad) segun la pestana "CUADRO ESTADISTICO
+  // DE ACTOS Y CONDICIONES INSEGURAS" de las hojas de origen. El item 10 de ASESE
+  // varia entre propiedades (se usa el nombre generico "Otras novedades de campo").
+  var NT_LABELS = {
+    ASESE: {
+      1:"SUSTRACCIONES INTERNAS", 2:"ROBOS, PERDIDAS, SUSTRACCIONES",
+      3:"INTRUSION DE PERSONAS POR PERIMETROS", 4:"INTRUSION DE VEHICULOS POR PERIMETROS",
+      5:"INTENTO DE INCURSION (EXTERIOR PERIMETRO)", 6:"TRABAJOS EN CAMPO NO INFORMADOS A TIEMPO",
+      7:"PERSONAL INTERNO EN PERIMETRO NO AUTORIZADO", 8:"PERSONAL SOSPECHOSO EN EL EXTERIOR (PERIMETRAL)",
+      9:"VEHICULO NO AUTORIZADO EN EL EXTERIOR (PERIMETRAL)", 10:"INCIDENTE DE CAMPO / PRODUCTO"
+    },
+    CSESE: {
+      1:"FALLA DE AIREADORES", 2:"FALLA DE COMUNICACIÓN RADIAL", 3:"FALTA DE ILUMINACION",
+      4:"CORTE DE ENERGIA EN EL SECTOR", 5:"FALLA DE CERCO PERIMETRAL",
+      6:"FALLAS EN LA CERCA (NATURAL O ESTRUCTURAL)", 7:"INTERMITENCIA O LATENCIA DE RED DE INTERNET (CLIENTE)",
+      8:"SECTORES PERIMETRALES CON MALEZA"
+    }
+  };
+  function novedadLabel(tipo, nt){
+    var n = parseInt(String(nt).replace(/[^\d]/g,""), 10);
+    var table = NT_LABELS[tipo];
+    if (table && n && table[n]) return table[n];
+    return null;
+  }
+
+  function normTipo(s, desc){
     s = cleanWs(s);
-    if (!s) return "Sin clasificar";
+    if (!s){
+      if (desc && /aireador/i.test(desc)) return "CSESE";
+      return "Sin clasificar";
+    }
     var u = s.toUpperCase();
     if (u.charAt(0) === "A") return "ASESE";
     if (u.charAt(0) === "C") return "CSESE";
@@ -931,7 +969,7 @@
       var camaronera = camp ? camp.toUpperCase() : propText;
       out.push({
         n: out.length + 1, estacion: estacionLabel, dia: dia, hora: hora,
-        camaronera: camaronera, perimetro: piscina, nt: nt, tipo: normTipo(tipo),
+        camaronera: camaronera, perimetro: piscina, nt: nt, tipo: normTipo(tipo, desc),
         descripcion: desc, involucrado: titleCase(inv), nivel: normNivel(niv),
         operador: titleCase(op), accion: acc
       });
@@ -1009,6 +1047,7 @@
     barProp: document.getElementById("barProp"),
     hourChart: document.getElementById("hourChart"),
     stdTrendPanel: document.getElementById("stdTrendPanel"),
+    novedadPanel: document.getElementById("novedadPanel"),
     tbody: document.getElementById("tbody"),
     tableCount: document.getElementById("tableCount"),
     tableFoot: document.getElementById("tableFoot"),
@@ -1031,10 +1070,25 @@
     });
   }
 
+  // Sectores y propiedades conocidos por el registro de hojas, para que aparezcan
+  // en los filtros aunque todavia no tengan incidentes cargados.
+  var KNOWN_SECTORS = uniqueSorted(SHEET_REGISTRY.map(function(s){return s.estacion;}));
+  var KNOWN_PROPS_BY_SECTOR = {};
+  SHEET_REGISTRY.forEach(function(s){
+    if (!KNOWN_PROPS_BY_SECTOR[s.estacion]) KNOWN_PROPS_BY_SECTOR[s.estacion] = [];
+    KNOWN_PROPS_BY_SECTOR[s.estacion].push(s.prop);
+  });
+  var KNOWN_PROPS_ALL = uniqueSorted(SHEET_REGISTRY.map(function(s){return s.prop;}));
+
+  function renameOptionLabel(sel, value, newLabel){
+    Array.prototype.forEach.call(sel.options, function(o){ if (o.value === value) o.textContent = newLabel; });
+  }
+
   var estaciones = [];
   function propsForSector(sector){
     var pool = sector ? DATA.filter(function(d){return d.estacion===sector;}) : DATA;
-    return uniqueSorted(pool.map(function(d){return d.prop;}));
+    var known = sector ? (KNOWN_PROPS_BY_SECTOR[sector] || []) : KNOWN_PROPS_ALL;
+    return uniqueSorted(pool.map(function(d){return d.prop;}).concat(known));
   }
   function updatePropOptionsForSector(sectorSelectEl, propSelectEl){
     var prev = propSelectEl.value;
@@ -1043,11 +1097,13 @@
     propSelectEl.value = stillValid ? prev : "";
   }
   function populateFilters(){
-    estaciones = uniqueSorted(DATA.map(function(d){return d.estacion;}));
+    estaciones = uniqueSorted(DATA.map(function(d){return d.estacion;}).concat(KNOWN_SECTORS));
     fillSelect(els.fCliente, uniqueSorted(DATA.map(function(d){return d.cliente;})), "Todos los clientes");
     fillSelect(els.fProp, propsForSector(els.fEst.value), "Todas las propiedades");
     fillSelect(els.fTipo, uniqueSorted(DATA.map(function(d){return d.tipo;})), "Todos los tipos");
+    renameOptionLabel(els.fTipo, "Sin clasificar", "OTROS");
     fillSelect(els.fNivel, NIVEL_ORDER.filter(function(n){ return DATA.some(function(d){return d.nivel===n;}); }), "Todos los niveles");
+    renameOptionLabel(els.fNivel, "Sin clasificar", "OTROS");
     fillSelect(els.fEst, estaciones, "Todos los sectores");
     fillSelect(els.fOperador, uniqueSorted(DATA.map(function(d){return d.op;})), "Todos los operadores");
     var rEstEl = document.getElementById("rEst");
@@ -1056,7 +1112,9 @@
       fillSelect(rEstEl, estaciones, "Todos los sectores");
       fillSelect(document.getElementById("rProp"), propsForSector(rEstEl.value), "Todas las propiedades");
       fillSelect(document.getElementById("rTipo"), uniqueSorted(DATA.map(function(d){return d.tipo;})), "Todos los tipos");
+      renameOptionLabel(document.getElementById("rTipo"), "Sin clasificar", "OTROS");
       fillSelect(document.getElementById("rNivel"), NIVEL_ORDER.filter(function(n){ return DATA.some(function(d){return d.nivel===n;}); }), "Todos los niveles");
+      renameOptionLabel(document.getElementById("rNivel"), "Sin clasificar", "OTROS");
       fillSelect(document.getElementById("rOperador"), uniqueSorted(DATA.map(function(d){return d.op;})), "Todos los operadores");
     }
   }
@@ -1203,60 +1261,71 @@
 
   function renderStdTrend(container, rows){
     container.innerHTML = "";
-    var byMonth = MESES_FULL.map(function(){ return {asese:0, csese:0}; });
+    var byMonth = MESES_FULL.map(function(){ return {asese:0, csese:0, sinclas:0}; });
+    var totalStd = 0;
     rows.forEach(function(d){
       var f = parseFecha(d.fecha);
       if (!f) return;
-      if (d.tipo === "ASESE") byMonth[f.month].asese++;
-      else if (d.tipo === "CSESE") byMonth[f.month].csese++;
+      if (d.tipo === "ASESE") { byMonth[f.month].asese++; totalStd++; }
+      else if (d.tipo === "CSESE") { byMonth[f.month].csese++; totalStd++; }
+      else { byMonth[f.month].sinclas++; totalStd++; }
     });
-    var active = byMonth.map(function(m,i){ return {m:m, i:i}; }).filter(function(x){ return x.m.asese + x.m.csese > 0; });
-    if (!active.length){
+    if (!totalStd){
       container.innerHTML = '<div class="empty-state">Sin datos para este filtro</div>';
       return;
     }
+    var all = byMonth.map(function(m,i){ return {m:m, i:i}; });
+
     var wrap = document.createElement("div");
     wrap.className = "std-trend-wrap";
     var legend = document.createElement("div");
     legend.className = "trend-legend";
     legend.innerHTML = '<span><i class="trend-dot" style="background:var(--blue-accent)"></i>ASESE</span>' +
-      '<span><i class="trend-dot" style="background:#00e6c3"></i>CSESE</span>';
+      '<span><i class="trend-dot" style="background:#00e6c3"></i>CSESE</span>' +
+      '<span><i class="trend-dot" style="background:var(--text-faint)"></i>Otros</span>';
     wrap.appendChild(legend);
 
     var w = 640, h = 220, padL = 8, padR = 8, padB = 28, padT = 22;
     var innerW = w - padL - padR, innerH = h - padT - padB;
-    var maxV = active.reduce(function(a,x){ return Math.max(a, x.m.asese, x.m.csese); }, 1);
-    var n = active.length;
+    var maxV = all.reduce(function(a,x){ return Math.max(a, x.m.asese, x.m.csese, x.m.sinclas); }, 1);
+    var n = all.length;
     var groupW = innerW / n;
-    var barW = Math.min(20, groupW * 0.32);
+    var barW = Math.min(14, groupW * 0.22);
     var gap = barW * 0.18;
+    var setW = barW*3 + gap*2;
 
     var svg = svgEl("svg", {viewBox:"0 0 "+w+" "+h, width:"100%", height:"100%", class:"stdchart", preserveAspectRatio:"none"});
     svg.appendChild(svgEl("line", {x1:padL, y1:h-padB, x2:w-padR, y2:h-padB, class:"axis"}));
 
-    active.forEach(function(x, i){
+    all.forEach(function(x, i){
       var cx = padL + groupW*i + groupW/2;
       var hA = (x.m.asese/maxV) * innerH;
       var hC = (x.m.csese/maxV) * innerH;
-      var xA = cx - gap/2 - barW;
-      var xC = cx + gap/2;
+      var hS = (x.m.sinclas/maxV) * innerH;
+      var xA = cx - setW/2;
+      var xC = xA + barW + gap;
+      var xS = xC + barW + gap;
       var yBase = h - padB;
 
-      var rA = svgEl("rect", {x:xA, y:yBase-hA, width:barW, height:Math.max(hA,1), rx:3, class:"bar-asese"});
+      var rA = svgEl("rect", {x:xA, y:yBase-hA, width:barW, height:Math.max(hA,1), rx:2.5, class:"bar-asese"});
       svg.appendChild(rA);
-      var rC = svgEl("rect", {x:xC, y:yBase-hC, width:barW, height:Math.max(hC,1), rx:3, class:"bar-csese"});
+      var rC = svgEl("rect", {x:xC, y:yBase-hC, width:barW, height:Math.max(hC,1), rx:2.5, class:"bar-csese"});
       svg.appendChild(rC);
+      var rS = svgEl("rect", {x:xS, y:yBase-hS, width:barW, height:Math.max(hS,1), rx:2.5, class:"bar-sinclas"});
+      svg.appendChild(rS);
 
-      if (x.m.asese > 0){
-        var tA = svgEl("text", {x:xA+barW/2, y:yBase-hA-5, "text-anchor":"middle", class:"bar-val"});
-        tA.textContent = x.m.asese;
-        svg.appendChild(tA);
-      }
-      if (x.m.csese > 0){
-        var tC = svgEl("text", {x:xC+barW/2, y:yBase-hC-5, "text-anchor":"middle", class:"bar-val"});
-        tC.textContent = x.m.csese;
-        svg.appendChild(tC);
-      }
+      var tA = svgEl("text", {x:xA+barW/2, y:yBase-hA-5, "text-anchor":"middle", class:"bar-val"});
+      tA.textContent = x.m.asese;
+      svg.appendChild(tA);
+
+      var tC = svgEl("text", {x:xC+barW/2, y:yBase-hC-5, "text-anchor":"middle", class:"bar-val"});
+      tC.textContent = x.m.csese;
+      svg.appendChild(tC);
+
+      var tS = svgEl("text", {x:xS+barW/2, y:yBase-hS-5, "text-anchor":"middle", class:"bar-val"});
+      tS.textContent = x.m.sinclas;
+      svg.appendChild(tS);
+
       var tM = svgEl("text", {x:cx, y:h-8, "text-anchor":"middle", class:"tick"});
       tM.textContent = MESES_FULL[x.i].slice(0,3);
       svg.appendChild(tM);
@@ -1400,6 +1469,12 @@
     renderBars(els.barProp, countBy(rows, "prop"), 8);
     renderHourChart(els.hourChart, rows);
     renderStdTrend(els.stdTrendPanel, rows);
+    var novedadCounts = {};
+    rows.forEach(function(d){
+      var label = novedadLabel(d.tipo, d.nt) || (d.tipo && d.tipo !== "Sin clasificar" ? d.tipo : "Otros");
+      novedadCounts[label] = (novedadCounts[label]||0) + 1;
+    });
+    renderRankList(els.novedadPanel, novedadCounts, 10, {});
 
     els.tbody.innerHTML = "";
     if (!rows.length){
